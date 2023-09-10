@@ -9,7 +9,9 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 
 
-class ParseSheet extends Command {
+class ParseCommand extends Command {
+
+	private OutputInterface $output;
 
 	const SHEET_MAP = [
 		'flexi'  => 'PPFCF',
@@ -22,21 +24,28 @@ class ParseSheet extends Command {
 		$this->setName( 'parse' )
 		     ->setDescription( 'Find diff of mutual fund stock holdings.' )
 		     ->setHelp( 'This command help you generate diff of share changes per month for a PPFAS mutual fund' )
-		     ->addArgument( 'oldurl', InputArgument::REQUIRED, 'Spreadsheet of previous month' )
-		     ->addArgument( 'newurl', InputArgument::REQUIRED, 'Spreadsheet of this month' )
-		     ->addOption( 'fund-name', 'f', InputArgument::OPTIONAL, 'Pick from ' . join( ',', array_keys( self::SHEET_MAP ) ), 'tax' );
+		     ->addArgument( 'month-diff-x', InputArgument::OPTIONAL, 'For comparing old sheet as X, As if Y - X.', 2 )
+		     ->addOption( 'fund-name', 'f', InputArgument::OPTIONAL, 'Pick from ' . join( ',', array_keys( self::SHEET_MAP ) ), 'tax' )
+		     ->addOption( 'month-diff-y', 'y', InputArgument::OPTIONAL, 'For comparing new sheet as Y, As if Y - X.', 1 );
 	}
 
 	public function execute( InputInterface $input, OutputInterface $output ) {
-		// Get option value.
-		$option  = $input->getOption( 'fund-name' );
-		$oldpath = $this->download_spreadsheet_in_temp_dir( $input->getArgument( 'oldurl' ) );
-		$output->writeln( 'File downloaded to ' . $oldpath );
-		$newpath = $this->download_spreadsheet_in_temp_dir( $input->getArgument( 'newurl' ) );
-		$output->writeln( 'File downloaded to ' . $newpath );
+		$option    = $input->getOption( 'fund-name' );
+		$month_old = intval( $input->getArgument( 'month-diff-x' ) );
+		$month_new = intval( $input->getOption( 'month-diff-y' ) );
+		$this->output = $output;
 
-		$old_sheet = $this->get_excel_column_map( $oldpath, $option );
-		$new_sheet = $this->get_excel_column_map( $newpath, $option );
+		$old_path = $this->download_handler( $month_old );
+		$new_path = $this->download_handler( $month_new );
+
+		if ( ! $old_path || ! $new_path ) {
+			$output->writeln( 'Unable to download file.' );
+
+			return Command::FAILURE;
+		}
+
+		$old_sheet = $this->get_excel_column_map( $old_path, $option );
+		$new_sheet = $this->get_excel_column_map( $new_path, $option );
 
 		// Compare key and value = find diff of % and list.
 		$column_diff = [];
@@ -62,6 +71,21 @@ class ParseSheet extends Command {
 		$table->render();
 
 		return Command::SUCCESS;
+	}
+
+	public function download_handler( int $month ): string|bool {
+		$url      = $this->generate_url( $month, 'xlsx' );
+		$this->output->isDebug() && $this->output->writeln( 'Downloading file: ' . $url );
+		$new_path = $this->download_spreadsheet_in_temp_dir( $url );
+		if ( ! $new_path ) {
+			$this->output->isDebug() && $this->output->writeln( 'Unable to download xlsx file, retrying with xls extension: ' . $url );
+			// retry download with xlsx extension.
+			$new_url = $this->generate_url( $month );
+
+			return $this->download_spreadsheet_in_temp_dir( $new_url );
+		}
+
+		return $new_path;
 	}
 
 	public function get_excel_column_map( string $filename, string $sheet_name ) {
@@ -133,12 +157,45 @@ class ParseSheet extends Command {
 		}
 		$fp = fopen( $temp_file, 'w+' );
 		$ch = curl_init( $url );
+		// if 404 then do not download.
+		curl_setopt( $ch, CURLOPT_NOBODY, true );
+		curl_setopt( $ch, CURLOPT_RETURNTRANSFER, true );
 		curl_setopt( $ch, CURLOPT_FILE, $fp );
 		curl_setopt( $ch, CURLOPT_FOLLOWLOCATION, true );
 		curl_exec( $ch );
+		$http_code = curl_getinfo( $ch, CURLINFO_HTTP_CODE );
 		curl_close( $ch );
 		fclose( $fp );
+		if ( $http_code !== 200 ) {
+			unlink( $temp_file );
+
+			return false;
+		}
 
 		return $temp_file;
+	}
+
+	public function get_last_date_of_datetime( \DateTime $current_date ) {
+		return new \DateTime( date( "Y-m-t", $current_date->format( 'U' ) ) );
+	}
+
+	public function generate_url( int $month_diff, $extension = 'xls' ) {
+		// Last month date object.
+		$current_date = new \DateTime();
+		if ( $month_diff !== 0 ) {
+			$current_date->modify( '-' . $month_diff . ' month' );
+		}
+		$last_day_of_month = $this->get_last_date_of_datetime( $current_date );
+		$year              = $last_day_of_month->format( 'Y' );
+		$month             = $last_day_of_month->format( 'F' );
+		$day               = $last_day_of_month->format( 'd' );
+
+		$extension = 'xls';
+		// If August 31, 2023, or later than use new url.
+		if ( $last_day_of_month->format( 'U' ) >= strtotime( '2023-08-31' ) ) {
+			$extension = 'xlsx';
+		}
+
+		return sprintf( 'https://amc.ppfas.com/downloads/portfolio-disclosure/%1$s/PPFAS_Monthly_Portfolio_Report_%2$s_%3$s_%1$s.%4$s', $year, $month, $day, $extension );
 	}
 }
