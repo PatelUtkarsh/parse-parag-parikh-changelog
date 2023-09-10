@@ -1,0 +1,18 @@
+{
+    "name": "spock/php-parse-mutual-fund",
+    "autoload": {
+        "psr-4": {
+            "Spock\\PhpParseMutualFund\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Utkarsh Patel",
+            "email": "itismeutkarsh@gmail.com"
+        }
+    ],
+    "require": {
+        "symfony/console": "^6.0",
+        "phpoffice/phpspreadsheet": "^1.29"
+    }
+}
