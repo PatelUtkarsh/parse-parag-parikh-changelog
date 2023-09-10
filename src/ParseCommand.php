@@ -2,6 +2,7 @@
 
 namespace Spock\PhpParseMutualFund;
 
+use GuzzleHttp\Exception\GuzzleException;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Helper\Table;
 use Symfony\Component\Console\Input\InputArgument;
@@ -165,7 +166,16 @@ class ParseCommand extends Command {
 				]
 			]
 		);
-		$response  = $client->get( $url, [ 'sink' => $fp ] );
+		try {
+			$response = $client->get( $url, [ 'sink' => $fp ] );
+		}
+		catch ( GuzzleException $e ) {
+			fclose( $fp );
+			unlink( $temp_file );
+			$this->output->isDebug() && $this->output->writeln( 'Unable to download file: ' . $url );
+
+			return false;
+		}
 		$http_code = $response->getStatusCode();
 		fclose( $fp );
 		if ( $http_code !== 200 ) {
@@ -194,12 +204,6 @@ class ParseCommand extends Command {
 		$year              = $last_day_of_month->format( 'Y' );
 		$month             = $last_day_of_month->format( 'F' );
 		$day               = $last_day_of_month->format( 'd' );
-
-		$extension = 'xls';
-		// If August 31, 2023, or later than use new url.
-		if ( $last_day_of_month->format( 'U' ) >= strtotime( '2023-08-31' ) ) {
-			$extension = 'xlsx';
-		}
 
 		return sprintf( 'https://amc.ppfas.com/downloads/portfolio-disclosure/%1$s/PPFAS_Monthly_Portfolio_Report_%2$s_%3$s_%1$s.%4$s', $year, $month, $day, $extension );
 	}
