@@ -91,7 +91,7 @@ class ParseCommand extends Command {
 	public function get_excel_column_map( string $filename, string $sheet_name ) {
 		// Extract file name extension.
 		$inputFileType = \PhpOffice\PhpSpreadsheet\IOFactory::identify( $filename );
-		$filterSubset  = new MyReadFilter();
+		$filterSubset  = new CustomFilterRowColumns();
 		// Create a new Reader of the type that has been identified
 		$reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReader( $inputFileType );
 		$reader->setReadDataOnly( true );
