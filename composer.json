@@ -13,6 +13,7 @@
     ],
     "require": {
         "symfony/console": "^6.0",
-        "phpoffice/phpspreadsheet": "^1.29"
+        "phpoffice/phpspreadsheet": "^1.29",
+        "guzzlehttp/guzzle": "^7.8"
     }
 }

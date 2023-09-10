@@ -30,9 +30,9 @@ class ParseCommand extends Command {
 	}
 
 	public function execute( InputInterface $input, OutputInterface $output ) {
-		$option    = $input->getOption( 'fund-name' );
-		$month_old = intval( $input->getArgument( 'month-diff-x' ) );
-		$month_new = intval( $input->getOption( 'month-diff-y' ) );
+		$option       = $input->getOption( 'fund-name' );
+		$month_old    = intval( $input->getArgument( 'month-diff-x' ) );
+		$month_new    = intval( $input->getOption( 'month-diff-y' ) );
 		$this->output = $output;
 
 		$old_path = $this->download_handler( $month_old );
@@ -74,7 +74,7 @@ class ParseCommand extends Command {
 	}
 
 	public function download_handler( int $month ): string|bool {
-		$url      = $this->generate_url( $month, 'xlsx' );
+		$url = $this->generate_url( $month, 'xlsx' );
 		$this->output->isDebug() && $this->output->writeln( 'Downloading file: ' . $url );
 		$new_path = $this->download_spreadsheet_in_temp_dir( $url );
 		if ( ! $new_path ) {
@@ -153,24 +153,29 @@ class ParseCommand extends Command {
 		$filename  = basename( $url );
 		$temp_file = $temp_dir . DIRECTORY_SEPARATOR . strtok( $filename, '?' );
 		if ( file_exists( $temp_file ) ) {
+			$this->output->isDebug() && $this->output->writeln( 'File already exists: ' . $temp_file );
+
 			return $temp_file;
 		}
-		$fp = fopen( $temp_file, 'w+' );
-		$ch = curl_init( $url );
-		// if 404 then do not download.
-		curl_setopt( $ch, CURLOPT_NOBODY, true );
-		curl_setopt( $ch, CURLOPT_RETURNTRANSFER, true );
-		curl_setopt( $ch, CURLOPT_FILE, $fp );
-		curl_setopt( $ch, CURLOPT_FOLLOWLOCATION, true );
-		curl_exec( $ch );
-		$http_code = curl_getinfo( $ch, CURLINFO_HTTP_CODE );
-		curl_close( $ch );
+		$fp        = fopen( $temp_file, 'w' );
+		$client    = new \GuzzleHttp\Client(
+			[
+				'headers' => [
+					'User-Agent' => 'Mozilla/5.0 (Windows NT 6.1; rv:60.0) Gecko/20100101 Firefox/60.0',
+				]
+			]
+		);
+		$response  = $client->get( $url, [ 'sink' => $fp ] );
+		$http_code = $response->getStatusCode();
 		fclose( $fp );
 		if ( $http_code !== 200 ) {
 			unlink( $temp_file );
+			$this->output->isDebug() && $this->output->writeln( 'Unable to download file: ' . $url );
 
 			return false;
 		}
+
+		$this->output->isDebug() && $this->output->writeln( 'Downloaded file: ' . $temp_file );
 
 		return $temp_file;
 	}
