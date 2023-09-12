@@ -65,7 +65,7 @@ class ParseCommand extends Command {
 			$table->addRow( [
 				$name,
 				round( $percentage * 100, 4 ) . '%',
-				isset( $old_sheet[ $name ] ) ? $old_sheet[ $name ] * 100 : '',
+				isset( $old_sheet[ $name ] ) ? $old_sheet[ $name ] * 100 : '0',
 				$new_sheet[ $name ] * 100
 			] );
 		}
