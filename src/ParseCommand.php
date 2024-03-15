@@ -18,7 +18,7 @@ class ParseCommand extends Command {
 		'flexi'  => 'PPFCF',
 		'liquid' => 'PPFLP',
 		'hybrid' => 'PPCHF',
-		'tax'    => 'PPTSF',
+		'tax'    => [ 'PPTSF', 'PPETSF' ],
 	];
 
 	public function configure() {
@@ -89,14 +89,18 @@ class ParseCommand extends Command {
 		return $new_path;
 	}
 
-	public function get_excel_column_map( string $filename, string $sheet_name ) {
+	public function get_excel_column_map( string $filename, string $sheetCode, int $try = 0 ) {
 		// Extract file name extension.
 		$inputFileType = \PhpOffice\PhpSpreadsheet\IOFactory::identify( $filename );
 		$filterSubset  = new CustomFilterRowColumns();
 		// Create a new Reader of the type that has been identified
 		$reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReader( $inputFileType );
 		$reader->setReadDataOnly( true );
-		$reader->setLoadSheetsOnly( [ self::SHEET_MAP[ $sheet_name ] ] );
+		$sheetName = self::SHEET_MAP[ $sheetCode ];
+		if ( is_array( $sheetName ) ) {
+			$sheetName = $sheetName[$try];
+		}
+		$reader->setLoadSheetsOnly( [ $sheetName ] );
 		$reader->setReadFilter( $filterSubset );
 		$spreadsheet = $reader->load( $filename );
 		// get sheet names.
@@ -128,7 +132,7 @@ class ParseCommand extends Command {
 
 		// Clear all array entries where percent is not float.
 		$output = array_filter( $output, function ( $item ) {
-			return is_float( $item['percent'] ) || empty( $item['name'] );
+			return empty( $item['name'] ) || ( isset( $item['percent'] ) && is_float( $item['percent'] ) );
 		} );
 
 		// Make key value array.
@@ -139,6 +143,7 @@ class ParseCommand extends Command {
 			'Total',
 			'Last 3 year',
 			'Last 1 year',
+			'Clearing Corporation of India Ltd'
 		];
 		foreach ( $remove_strings as $remove_string ) {
 			$output = array_filter( $output, function ( $item ) use ( $remove_string ) {
@@ -146,7 +151,13 @@ class ParseCommand extends Command {
 			}, ARRAY_FILTER_USE_KEY );
 		}
 
-		return array_filter( $output );
+		$filtered_output = array_filter( $output );
+		if ( empty( $filtered_output ) && $try < 1 && is_array( self::SHEET_MAP[ $sheetCode ] ) ) {
+			$this->output->isDebug() && $this->output->writeln( 'Unable to find any data in sheet: ' . $sheetName . ' retrying with next sheet name.' );
+
+			return $this->get_excel_column_map( $filename, $sheetCode, $try + 1 );
+		}
+		return $filtered_output;
 	}
 
 	public function download_spreadsheet_in_temp_dir( string $url ) {
