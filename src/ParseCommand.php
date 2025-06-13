@@ -22,6 +22,48 @@ class ParseCommand extends Command {
 		'tax'    => [ 'PPTSF', 'PPETSF' ],
 	];
 
+	private const TARGET_SECTION_HEADERS = [
+		'Equity & Equity related' => 'equity_and_equity_related',
+		'Arbitrage' => 'arbitrage',
+		'(b) Reits' => 'b_reits',
+		'Equity & Equity related Foreign Investments' => 'equity_foreign_investments',
+		'Certificate of Deposit' => 'certificate_of_deposit',
+		'Commercial Paper' => 'commercial_paper',
+		'Treasury Bill' => 'treasury_bill',
+		'Mutual Fund Units' => 'mutual_fund_units',
+		'Reverse Repo / TREPS' => 'reverse_repo_treps',
+	];
+
+	private const SECTION_TERMINATOR = "GRAND TOTAL";
+
+	private const NON_DATA_IDENTIFIERS = [
+		'Total',
+		'Sub Total',
+		'Last 3 year',
+		'Last 1 year',
+		'Last 5 year',
+		'Since Inception',
+		'Clearing Corporation of India Ltd',
+		'TOTAL',
+		'Equity & Equity related',
+		'Listed / awaiting listing',
+		'awaiting listing',
+		'(MD ',
+		'Tbill',
+		'Days',
+		'#',
+		'(a)',
+		'(b)',
+		'(c)',
+		'(d)',
+		'(e)',
+		'(a) Listed',
+		'(b) Listed',
+		'Listed',
+		'Unlisted',
+		'Foreign'
+	];
+
 	public function configure(): void {
 		$this->setName( 'parse' )
 		     ->setDescription( 'Find diff of mutual fund stock holdings.' )
@@ -54,13 +96,18 @@ class ParseCommand extends Command {
 			return Command::FAILURE;
 		}
 
+		// Note: The execute method needs to be refactored to handle the new sectioned data structure
+		// For now, we'll flatten the data to maintain compatibility
+		$old_flat = $this->flattenSectionData($old_sheet);
+		$new_flat = $this->flattenSectionData($new_sheet);
+
 		// Compare key and value = find diff of % and list.
 		$column_diff = [];
-		$all_companies = array_unique(array_merge(array_keys($old_sheet), array_keys($new_sheet)));
+		$all_companies = array_unique(array_merge(array_keys($old_flat), array_keys($new_flat)));
 
 		foreach ( $all_companies as $name ) {
-			$old_percentage = $old_sheet[$name] ?? 0;
-			$new_percentage = $new_sheet[$name] ?? 0;
+			$old_percentage = $old_flat[$name] ?? 0;
+			$new_percentage = $new_flat[$name] ?? 0;
 			$diff = $new_percentage - $old_percentage;
 
 			// Only include if there's a significant change (more than 0.001%)
@@ -99,7 +146,23 @@ class ParseCommand extends Command {
 		}
 		$table->render();
 
+		// Also display section-wise breakdown
+		$this->displaySectionWiseComparison($old_sheet, $new_sheet, $output);
+
 		return Command::SUCCESS;
+	}
+
+	/**
+	 * Temporary helper to flatten sectioned data for backward compatibility
+	 */
+	private function flattenSectionData(array $sectionData): array {
+		$flattened = [];
+		foreach ($sectionData as $section => $items) {
+			foreach ($items as $item) {
+				$flattened[$item['name']] = $item['percent'];
+			}
+		}
+		return $flattened;
 	}
 
 	public function download_handler( int $month ): string|false {
@@ -138,8 +201,8 @@ class ParseCommand extends Command {
 			$nameColumn = null;
 			$percentColumn = null;
 
-			// Check first 10 rows to find column headers
-			for ($row = 1; $row <= 10; $row++) {
+			// Check first 20 rows to find column headers (increased from 10)
+			for ($row = 1; $row <= 20; $row++) {
 				$rowData = [];
 				for ($col = 'B'; $col <= 'L'; $col++) {
 					$cell = $worksheet->getCell($col . $row);
@@ -153,12 +216,14 @@ class ParseCommand extends Command {
 						$lowerValue = strtolower($value);
 						if (strpos($lowerValue, 'company') !== false ||
 							strpos($lowerValue, 'name') !== false ||
-							strpos($lowerValue, 'security') !== false) {
+							strpos($lowerValue, 'security') !== false ||
+							strpos($lowerValue, 'instrument') !== false) {
 							$nameColumn = $col;
 						}
 						if (strpos($lowerValue, '%') !== false ||
 							strpos($lowerValue, 'percent') !== false ||
-							strpos($lowerValue, 'weight') !== false) {
+							strpos($lowerValue, 'weight') !== false ||
+							strpos($lowerValue, 'assets') !== false) {
 							$percentColumn = $col;
 						}
 					}
@@ -201,92 +266,118 @@ class ParseCommand extends Command {
 			$spreadsheet = $reader->load( $filename );
 			$worksheet = $spreadsheet->getActiveSheet();
 
-			$output = [];
-			foreach ( $worksheet->getRowIterator() as $row ) {
-				$cellIterator = $row->getCellIterator();
-				$cellIterator->setIterateOnlyExistingCells( false );
-				$cells = [];
+			// Initialize sectioned data processing
+			$sections_data = [];
+			$current_section_normalized_key = null;
+			$current_section_items = [];
 
-				foreach ( $cellIterator as $cell ) {
-					$value = $cell->getValue();
-					$column = $cell->getColumn();
+			// Iterate through rows for section-based processing
+			foreach ( $worksheet->getRowIterator() as $row_object ) {
+				$row_number = $row_object->getRowIndex();
 
-					if ($column === $nameColumn) {
-						$cells['name'] = $value;
-					} elseif ($column === $percentColumn) {
-						$cells['percent'] = $value;
+				// Get cell value from Column 'B' (assuming section headers are always there)
+				$column_b_value = trim((string)$worksheet->getCell('B' . $row_number)->getValue());
+
+				// Termination Check: If we hit GRAND TOTAL, finish processing
+				if (strcasecmp($column_b_value, self::SECTION_TERMINATOR) === 0) {
+					if ($current_section_normalized_key !== null && !empty($current_section_items)) {
+						$sections_data[$current_section_normalized_key] = $current_section_items;
+					}
+					$this->output->isVerbose() && $this->output->writeln("Found GRAND TOTAL at row {$row_number}, stopping data extraction");
+					break;
+				}
+
+				// Section Header Check
+				$section_found = false;
+				foreach (self::TARGET_SECTION_HEADERS as $display_header => $normalized_key) {
+					if (strcasecmp($column_b_value, $display_header) === 0) {
+						// Save previous section if it exists
+						if ($current_section_normalized_key !== null && !empty($current_section_items)) {
+							$sections_data[$current_section_normalized_key] = $current_section_items;
+						}
+
+						$current_section_normalized_key = $normalized_key;
+						$current_section_items = [];
+						$section_found = true;
+						$this->output->isVerbose() && $this->output->writeln("Found section header: {$display_header} -> {$normalized_key}");
+						break;
 					}
 				}
 
-				if (!empty($cells) && isset($cells['name']) && isset($cells['percent'])) {
-					$output[] = $cells;
+				if ($section_found) {
+					continue; // This row is a header, not data
+				}
+
+				// Data Row Processing (if we're inside a section)
+				if ($current_section_normalized_key !== null) {
+					// Get potential name and percent values
+					$name_value = trim((string)$worksheet->getCell($nameColumn . $row_number)->getValue());
+					$percent_value_raw = $worksheet->getCell($percentColumn . $row_number)->getValue();
+
+					// Validate name_value as a data item
+					if (empty($name_value) || strlen($name_value) <= 2) {
+						continue; // Skip empty or too short names
+					}
+
+					// Check against NON_DATA_IDENTIFIERS
+					$is_non_data = false;
+					foreach (self::NON_DATA_IDENTIFIERS as $identifier) {
+						if (stripos($name_value, $identifier) !== false) {
+							$is_non_data = true;
+							break;
+						}
+					}
+
+					if ($is_non_data) {
+						$this->output->isVerbose() && $this->output->writeln("Skipping non-data row: {$name_value}");
+						continue;
+					}
+
+					// Validate and Convert percent_value_raw
+					$percent_numeric = null;
+					$percent_str_cleaned = str_replace('%', '', (string)$percent_value_raw);
+
+					if (is_numeric($percent_str_cleaned)) {
+						$value = (float)$percent_str_cleaned;
+						if (strpos((string)$percent_value_raw, '%') !== false) {
+							// If original value had '%', it's like "8.11%", so convert to 0.0811
+							$percent_numeric = $value / 100.0;
+						} else {
+							// Assumed to be already in decimal form (e.g., 0.0811)
+							// Or handle cases where it might be a whole number
+							if ($value > 1) {
+								// Likely a percentage that needs conversion
+								$percent_numeric = $value / 100.0;
+							} else {
+								$percent_numeric = $value;
+							}
+						}
+					}
+
+					if ($percent_numeric === null || $percent_numeric <= 0) {
+						continue; // Skip invalid or zero percentages
+					}
+
+					// Add valid data item to current section
+					$current_section_items[] = ['name' => $name_value, 'percent' => $percent_numeric];
+					$this->output->isVerbose() && $this->output->writeln("Added to {$current_section_normalized_key}: {$name_value} ({$percent_numeric})");
 				}
 			}
 
-			// Clear all array entries where percent is not numeric or name is empty
-			$output = array_filter( $output, function ( $item ) {
-				return !empty( $item['name'] ) &&
-					   is_string($item['name']) &&
-					   strlen(trim($item['name'])) > 2 &&
-					   isset( $item['percent'] ) &&
-					   is_numeric($item['percent']) &&
-					   $item['percent'] > 0;
-			} );
-
-			// Convert percent to float if it's not already
-			$output = array_map(function($item) {
-				$item['percent'] = (float) $item['percent'];
-				$item['name'] = trim($item['name']);
-				return $item;
-			}, $output);
-
-			// Make key value array.
-			$names = array_column($output, 'name');
-			$percents = array_column($output, 'percent');
-
-			if (count($names) !== count($percents) || empty($names)) {
-				if ($try < 1 && is_array(self::SHEET_MAP[$sheetCode])) {
-					$this->output->isVerbose() && $this->output->writeln('Unable to find valid data in sheet: ' . $sheetName . ' retrying with next sheet name.');
-					return $this->get_excel_column_map($filename, $sheetCode, $try + 1);
-				}
-				return [];
+			// After Loop Cleanup: handle case where GRAND TOTAL was missing
+			if ($current_section_normalized_key !== null && !empty($current_section_items)) {
+				$sections_data[$current_section_normalized_key] = $current_section_items;
 			}
 
-			$output = array_combine($names, $percents);
+			$this->output->isVerbose() && $this->output->writeln("Extracted " . count($sections_data) . " sections");
 
-			// Remove items which contains any of following strings.
-			$remove_strings = [
-				'Total',
-				'Last 3 year',
-				'Last 1 year',
-				'Last 5 year',
-				'Since Inception',
-				'Clearing Corporation of India Ltd',
-				'Grand Total',
-				'Sub Total',
-				'TOTAL',
-				'Equity & Equity related',
-				'Listed / awaiting listing',
-				'awaiting listing',
-				'(MD ',
-				'Tbill',
-				'Days',
-				'#'
-			];
-
-			foreach ( $remove_strings as $remove_string ) {
-				$output = array_filter( $output, function ( $key ) use ( $remove_string ) {
-					return stripos( $key, $remove_string ) === false;
-				}, ARRAY_FILTER_USE_KEY );
+			// Retry Logic (adapted for sectioned data)
+			if (empty($sections_data) && $try < 1 && is_array(self::SHEET_MAP[$sheetCode])) {
+				$this->output->isVerbose() && $this->output->writeln('Unable to find any sectioned data in sheet: ' . $sheetName . ' retrying with next sheet name.');
+				return $this->get_excel_column_map($filename, $sheetCode, $try + 1);
 			}
 
-			$filtered_output = array_filter( $output );
-			if ( empty( $filtered_output ) && $try < 1 && is_array( self::SHEET_MAP[ $sheetCode ] ) ) {
-				$this->output->isVerbose() && $this->output->writeln( 'Unable to find any data in sheet: ' . $sheetName . ' retrying with next sheet name.' );
-				return $this->get_excel_column_map( $filename, $sheetCode, $try + 1 );
-			}
-
-			return $filtered_output;
+			return $sections_data;
 
 		} catch (\Exception $e) {
 			$this->output->writeln('<error>Error processing Excel file: ' . $e->getMessage() . '</error>');
@@ -298,21 +389,13 @@ class ParseCommand extends Command {
 		$userAgents = [
 			'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36',
 			'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36',
-			'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36',
-			'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:56.0) Gecko/20100101 Firefox/56.0',
-			'Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:56.0) Gecko/20100101 Firefox/56.0',
-			'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_5) AppleWebKit/537.36 (KHTML, like Gecko) Safari/537.36',
-			'Mozilla/5.0 (Windows NT 10.0; Win64; x64; Trident/7.0; AS; rv:11.0) like Gecko',
-			'Mozilla/5.0 (Windows NT 6.1; Win64; x64; Trident/7.0; AS; rv:11.0) like Gecko',
-			'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_5) AppleWebKit/603.2.4 (KHTML, like Gecko) Version/10.1.1 Safari/603.2.4',
-			'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/15.15063',
 		];
 
 		$temp_dir  = sys_get_temp_dir();
 		$filename  = basename( $url );
 		$temp_file = $temp_dir . DIRECTORY_SEPARATOR . strtok( $filename, '?' );
 		if ( file_exists( $temp_file ) ) {
-			$this->output->isVerbose() && $this->output->writeln( 'File already exists: ' . $temp_file );
+			$this->output->isVerbose() && $this->output->writeln( 'File already exists, using cache: ' . $temp_file );
 			return $temp_file;
 		}
 
@@ -334,21 +417,17 @@ class ParseCommand extends Command {
 			$response = $client->get( $url, [ 'sink' => $fp ] );
 			$http_code = $response->getStatusCode();
 		} catch ( GuzzleException $e ) {
+			$this->output->writeln('<error>HTTP request failed: ' . $e->getMessage() . '</error>');
 			fclose( $fp );
-			if (file_exists($temp_file)) {
-				unlink( $temp_file );
-			}
-			$this->output->isVerbose() && $this->output->writeln( 'Unable to download file: ' . $url . ' Error: ' . $e->getMessage() );
+			unlink( $temp_file );
 			return false;
 		}
 
 		fclose( $fp );
 
 		if ( $http_code !== 200 ) {
-			if (file_exists($temp_file)) {
-				unlink( $temp_file );
-			}
-			$this->output->isVerbose() && $this->output->writeln( 'Unable to download file: ' . $url . ' HTTP Code: ' . $http_code );
+			$this->output->writeln('<error>HTTP error code: ' . $http_code . '</error>');
+			unlink( $temp_file );
 			return false;
 		}
 
@@ -364,7 +443,7 @@ class ParseCommand extends Command {
 		// Last month date object.
 		$current_date = new \DateTime();
 		if ( $month_diff !== 0 ) {
-			$current_date->modify( '-' . $month_diff . ' month' );
+			$current_date->modify( "-{$month_diff} month" );
 		}
 		$last_day_of_month = $this->get_last_date_of_datetime( $current_date );
 		$year              = $last_day_of_month->format( 'Y' );
@@ -372,5 +451,102 @@ class ParseCommand extends Command {
 		$day               = $last_day_of_month->format( 'd' );
 
 		return sprintf( 'https://amc.ppfas.com/downloads/portfolio-disclosure/%1$s/PPFAS_Monthly_Portfolio_Report_%2$s_%3$s_%1$s.%4$s', $year, $month, $day, $extension );
+	}
+
+	/**
+	 * Display section-wise comparison between old and new data
+	 */
+	private function displaySectionWiseComparison(array $oldSections, array $newSections, OutputInterface $output): void {
+		$output->writeln("\n<info>Section-wise Breakdown:</info>");
+
+		// Get all sections from both datasets
+		$allSections = array_unique(array_merge(array_keys($oldSections), array_keys($newSections)));
+		sort($allSections);
+
+		foreach ($allSections as $sectionKey) {
+			$oldItems = $oldSections[$sectionKey] ?? [];
+			$newItems = $newSections[$sectionKey] ?? [];
+
+			// Create lookup arrays for easier comparison
+			$oldLookup = [];
+			foreach ($oldItems as $item) {
+				$oldLookup[$item['name']] = $item['percent'];
+			}
+
+			$newLookup = [];
+			foreach ($newItems as $item) {
+				$newLookup[$item['name']] = $item['percent'];
+			}
+
+			// Get all companies in this section
+			$allCompanies = array_unique(array_merge(array_keys($oldLookup), array_keys($newLookup)));
+
+			// Calculate differences for this section
+			$sectionDiffs = [];
+			foreach ($allCompanies as $company) {
+				$oldPercent = $oldLookup[$company] ?? 0;
+				$newPercent = $newLookup[$company] ?? 0;
+				$diff = $newPercent - $oldPercent;
+
+				if (abs($diff) > 0.00001) { // Only include significant changes
+					$sectionDiffs[$company] = [
+						'diff' => $diff,
+						'old' => $oldPercent,
+						'new' => $newPercent
+					];
+				}
+			}
+
+			// Skip section if no changes
+			if (empty($sectionDiffs)) {
+				continue;
+			}
+
+			// Sort by absolute difference
+			uasort($sectionDiffs, function($a, $b) {
+				return abs($b['diff']) <=> abs($a['diff']);
+			});
+
+			// Display section header with readable name
+			$sectionDisplayName = $this->getSectionDisplayName($sectionKey);
+			$output->writeln("\n<comment>--- {$sectionDisplayName} ---</comment>");
+
+			// Create table for this section
+			$sectionTable = new Table($output);
+			$sectionTable->setHeaders(['Holding Name', 'Change (%)', 'Previous (%)', 'Current (%)']);
+
+			foreach ($sectionDiffs as $company => $data) {
+				$changeColor = $data['diff'] > 0 ? 'green' : 'red';
+				$changeSymbol = $data['diff'] > 0 ? '+' : '';
+
+				$sectionTable->addRow([
+					$company,
+					"<fg={$changeColor}>{$changeSymbol}" . round($data['diff'] * 100, 4) . '%',
+					round($data['old'] * 100, 4) . '%',
+					round($data['new'] * 100, 4) . '%'
+				]);
+			}
+
+			$sectionTable->render();
+		}
+	}
+
+	/**
+	 * Convert section key to readable display name
+	 */
+	private function getSectionDisplayName(string $sectionKey): string {
+		$displayNames = [
+			'equity_and_equity_related' => 'Equity & Equity Related',
+			'arbitrage' => 'Arbitrage',
+			'b_reits' => 'REITs',
+			'equity_foreign_investments' => 'Foreign Equity Investments',
+			'certificate_of_deposit' => 'Certificate of Deposit',
+			'commercial_paper' => 'Commercial Paper',
+			'treasury_bill' => 'Treasury Bills',
+			'mutual_fund_units' => 'Mutual Fund Units',
+			'reverse_repo_treps' => 'Reverse Repo / TREPS',
+		];
+
+		return $displayNames[$sectionKey] ?? ucwords(str_replace('_', ' ', $sectionKey));
 	}
 }

@@ -7,8 +7,8 @@ class ImprovedFilterRowColumns implements \PhpOffice\PhpSpreadsheet\Reader\IRead
 	private bool $columnsDetected = false;
 
 	public function readCell( string $columnAddress, int $row, string $worksheetName = '' ): bool {
-		// Read first 200 rows to ensure we capture all data
-		if ( $row >= 1 && $row <= 200 ) {
+		// Read first 5000 rows to ensure we capture all data including GRAND TOTAL
+		if ( $row >= 1 && $row <= 5000 ) {
 			// If columns haven't been detected yet, read all columns in first few rows
 			if (!$this->columnsDetected && $row <= 5) {
 				return true;
