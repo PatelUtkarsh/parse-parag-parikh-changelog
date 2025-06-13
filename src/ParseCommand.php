@@ -509,11 +509,10 @@ class ParseCommand extends Command {
 
 			// Display section header with readable name
 			$sectionDisplayName = $this->getSectionDisplayName($sectionKey);
-			$output->writeln("\n<comment>--- {$sectionDisplayName} ---</comment>");
 
-			// Create table for this section
+			// Create table for this section with section name in the header
 			$sectionTable = new Table($output);
-			$sectionTable->setHeaders(['Holding Name', 'Change (%)', 'Previous (%)', 'Current (%)']);
+			$sectionTable->setHeaders([$sectionDisplayName, 'Change (%)', 'Previous (%)', 'Current (%)']);
 
 			foreach ($sectionDiffs as $company => $data) {
 				$changeColor = $data['diff'] > 0 ? 'green' : 'red';
@@ -528,6 +527,7 @@ class ParseCommand extends Command {
 			}
 
 			$sectionTable->render();
+			$output->writeln(''); // Add spacing between sections
 		}
 	}
 
