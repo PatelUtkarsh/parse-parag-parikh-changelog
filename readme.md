@@ -49,3 +49,7 @@ Shows multiple tables:
 Green numbers = increases, Red numbers = decreases
 
 The tool downloads files automatically and shows percentage changes between the selected months.
+
+## Screenshot
+
+![Demo image](image.png)
