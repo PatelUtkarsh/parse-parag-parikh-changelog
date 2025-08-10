@@ -159,10 +159,60 @@ class ParseCommand extends Command {
 		$flattened = [];
 		foreach ($sectionData as $section => $items) {
 			foreach ($items as $item) {
-				$flattened[$item['name']] = $item['percent'];
+				$normalizedName = $this->normalizeCompanyName($item['name']);
+
+				// If this normalized name already exists, combine the percentages
+				if (isset($flattened[$normalizedName])) {
+					$flattened[$normalizedName] += $item['percent'];
+				} else {
+					$flattened[$normalizedName] = $item['percent'];
+				}
 			}
 		}
 		return $flattened;
+	}
+
+	/**
+	 * Normalize company names to handle minor text variations
+	 */
+	private function normalizeCompanyName(string $name): string {
+		// Remove common suffixes that might vary
+		$suffixesToRemove = [
+			' Limited',
+			' Ltd',
+			' Ltd.',
+			' Pvt Ltd',
+			' Private Limited',
+		];
+
+		$normalized = trim($name);
+
+		// Remove suffixes (case-insensitive)
+		foreach ($suffixesToRemove as $suffix) {
+			if (stripos($normalized, $suffix) === strlen($normalized) - strlen($suffix)) {
+				$normalized = trim(substr($normalized, 0, -strlen($suffix)));
+				break; // Only remove one suffix
+			}
+		}
+
+		// Additional normalizations
+		$normalized = preg_replace('/\s+/', ' ', $normalized); // Multiple spaces to single space
+		$normalized = trim($normalized);
+
+		// Handle specific known variations
+		$knownVariations = [
+			'Central Depository Services (India)' => 'Central Depository Services (India)',
+			'GAIL (India)' => 'GAIL (India)',
+		];
+
+		// Check if this is a known variation
+		foreach ($knownVariations as $variation => $canonical) {
+			if (stripos($normalized, $variation) !== false) {
+				return $canonical;
+			}
+		}
+
+		return $normalized;
 	}
 
 	public function download_handler( int $month ): string|false {
@@ -467,15 +517,25 @@ class ParseCommand extends Command {
 			$oldItems = $oldSections[$sectionKey] ?? [];
 			$newItems = $newSections[$sectionKey] ?? [];
 
-			// Create lookup arrays for easier comparison
+			// Create lookup arrays for easier comparison with normalization
 			$oldLookup = [];
 			foreach ($oldItems as $item) {
-				$oldLookup[$item['name']] = $item['percent'];
+				$normalizedName = $this->normalizeCompanyName($item['name']);
+				if (isset($oldLookup[$normalizedName])) {
+					$oldLookup[$normalizedName] += $item['percent'];
+				} else {
+					$oldLookup[$normalizedName] = $item['percent'];
+				}
 			}
 
 			$newLookup = [];
 			foreach ($newItems as $item) {
-				$newLookup[$item['name']] = $item['percent'];
+				$normalizedName = $this->normalizeCompanyName($item['name']);
+				if (isset($newLookup[$normalizedName])) {
+					$newLookup[$normalizedName] += $item['percent'];
+				} else {
+					$newLookup[$normalizedName] = $item['percent'];
+				}
 			}
 
 			// Get all companies in this section
