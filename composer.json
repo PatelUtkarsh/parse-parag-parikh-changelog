@@ -17,9 +17,11 @@
     "guzzlehttp/guzzle": "^7.8"
   },
   "require-dev": {
-    "squizlabs/php_codesniffer": "*"
+    "squizlabs/php_codesniffer": "*",
+    "phpstan/phpstan": "^2.1"
   },
   "scripts": {
-    "lint": "phpcs"
+    "lint": "phpcs --standard=phpcs.xml --extensions=php src/ index.php",
+    "stan": "phpstan analyse"
   }
 }

@@ -1,5 +1,6 @@
 <?php
 
+declare(strict_types=1);
 namespace Spock\PhpParseMutualFund;
 
 use GuzzleHttp\Exception\GuzzleException;
@@ -94,9 +95,14 @@ class ParseCommand extends Command
 
     public function execute(InputInterface $input, OutputInterface $output): int
     {
-        $option       = $input->getOption('fund-name');
-        $month_old    = intval($input->getArgument('month-diff-x'));
-        $month_new    = intval($input->getOption('month-diff-y'));
+        $fundNameOption = $input->getOption('fund-name');
+        $option         = is_scalar($fundNameOption) ? (string) $fundNameOption : 'tax'; // Default
+
+        $monthDiffXArg = $input->getArgument('month-diff-x');
+        $month_old     = is_scalar($monthDiffXArg) ? intval($monthDiffXArg) : 2; // Default
+
+        $monthDiffYOption = $input->getOption('month-diff-y');
+        $month_new        = is_scalar($monthDiffYOption) ? intval($monthDiffYOption) : 1; // Default
         $this->output = $output;
 
         $old_path = $this->downloadHandler($month_old);
@@ -160,7 +166,7 @@ class ParseCommand extends Command
         }
 
         // Multi-level sort
-        uasort($column_diff, function ($a, $b) {
+        uasort($column_diff, function (array $a, array $b): int {
             // Stocks with trades should come first
             if ($a['has_traded'] !== $b['has_traded']) {
                 return $a['has_traded'] ? - 1 : 1;
@@ -220,6 +226,8 @@ class ParseCommand extends Command
 
     /**
      * Temporary helper to flatten sectioned data for backward compatibility
+     * @param array<string, array<int, array{name: string, percent: float, quantity: int, market_value: float}>> $sectionData
+     * @return array<string, array{percent: float, quantity: int, market_value: float}>
      */
     private function flattenSectionData(array $sectionData): array
     {
@@ -272,7 +280,7 @@ class ParseCommand extends Command
 
         // Additional normalizations
         $normalized = preg_replace('/\s+/', ' ', $normalized);
-        $normalized = trim($normalized);
+        $normalized = trim((string) $normalized);
 
         // Handle specific known variations
         $knownVariations = [
@@ -307,6 +315,9 @@ class ParseCommand extends Command
         return $new_path;
     }
 
+    /**
+     * @return array<string, array<int, array{name: string, percent: float, quantity: int, market_value: float}>>
+     */
     public function getExcelColumnMap(string $filename, string $sheetCode, int $try = 0): array
     {
         try {
@@ -433,7 +444,7 @@ class ParseCommand extends Command
                 $row_number = $row_object->getRowIndex();
 
                 // Get cell value from Column 'B' (assuming section headers are always there)
-                $column_b_value = trim((string) $worksheet->getCell('B' . $row_number)->getValue());
+                $column_b_value = trim($worksheet->getCell('B' . $row_number)->getFormattedValue());
 
                 // Termination Check: If we hit GRAND TOTAL, finish processing
                 if (strcasecmp($column_b_value, self::SECTION_TERMINATOR) === 0) {
@@ -470,8 +481,8 @@ class ParseCommand extends Command
                 // Data Row Processing (if we're inside a section)
                 if ($current_section_normalized_key !== null) {
                     // Get potential name and percent values
-                    $name_value         = trim((string) $worksheet->getCell($nameColumn . $row_number)->getValue());
-                    $percent_value_raw  = $worksheet->getCell($percentColumn . $row_number)->getValue();
+                    $name_value         = trim($worksheet->getCell($nameColumn . $row_number)->getFormattedValue());
+                    $percent_value_raw  = $worksheet->getCell($percentColumn . $row_number)->getFormattedValue();
                     $quantity_value_raw = $worksheet->getCell($quantityColumn . $row_number)->getValue();
                     $market_value_raw   = $worksheet->getCell($marketValueColumn . $row_number)->getValue();
 
@@ -638,7 +649,11 @@ EOF
 
     public function getLastDateOfDatetime(\DateTime $current_date): \DateTime
     {
-        return new \DateTime(date("Y-m-t", $current_date->format('U')));
+        $date = clone $current_date;
+        $date->modify('last day of this month');
+        $date->setTime(0, 0, 0);
+
+        return $date;
     }
 
     public function generateUrl(int $month_diff, string $extension = 'xls'): string
@@ -665,6 +680,8 @@ EOF
 
     /**
      * Display section-wise comparison between old and new data
+     * @param array<string, array<int, array{name: string, percent: float, quantity: int, market_value: float}>> $oldSections
+     * @param array<string, array<int, array{name: string, percent: float, quantity: int, market_value: float}>> $newSections
      */
     private function displaySectionWiseComparison(array $oldSections, array $newSections, OutputInterface $output): void
     {
@@ -754,7 +771,7 @@ EOF
             }
 
             // Sort by absolute difference
-            uasort($sectionDiffs, function ($a, $b) {
+            uasort($sectionDiffs, function (array $a, array $b): int {
                 // Stocks with trades should come first
                 if ($a['has_traded'] !== $b['has_traded']) {
                     return $a['has_traded'] ? - 1 : 1;

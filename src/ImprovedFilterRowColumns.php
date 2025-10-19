@@ -1,9 +1,12 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Spock\PhpParseMutualFund;
 
 class ImprovedFilterRowColumns implements \PhpOffice\PhpSpreadsheet\Reader\IReadFilter
 {
+    /** @var string[] */
     private array $targetColumns = [];
     private bool $columnsDetected = false;
 
@@ -33,6 +36,9 @@ class ImprovedFilterRowColumns implements \PhpOffice\PhpSpreadsheet\Reader\IRead
         return false;
     }
 
+    /**
+     * @param string[] $columns
+     */
     public function setTargetColumns(array $columns): void
     {
         $this->targetColumns = $columns;
