@@ -62,7 +62,7 @@ The tool outputs one or more tables directly to the console.
 
 ### Sorting
 
-The table is sorted to show actively traded stocks first, ordered by the magnitude of their percentage change. Stocks with only price-driven changes are listed below them.
+The table is sorted to show actively traded stocks first, ordered by the magnitude of their trade value (share price * number of shares traded). Stocks with only price-driven changes are listed below them.
 
 ## For Developers
 

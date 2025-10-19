@@ -164,6 +164,9 @@ class ParseCommand extends Command
             $has_traded           = ( $quantity_diff != 0 );
             $display_percent_diff = $has_traded ? $percent_diff : 0;
 
+            $price_for_trade = $new_price > 0 ? $new_price : $old_price;
+            $trade_value     = $price_for_trade * $quantity_diff;
+
             if (abs($percent_diff) > 0.00001) { // Include if there's any real percentage change
                 $column_diff[ $name ] = [
                     'has_traded'           => $has_traded,
@@ -174,6 +177,7 @@ class ParseCommand extends Command
                     'quantity_diff'        => $quantity_diff,
                     'old_price'            => $old_price,
                     'new_price'            => $new_price,
+                    'trade_value'          => $trade_value,
                 ];
             }
         }
@@ -185,8 +189,8 @@ class ParseCommand extends Command
                 return $a['has_traded'] ? - 1 : 1;
             }
 
-            // Then, sort by the absolute magnitude of the real percentage change
-            return abs($b['percent_diff']) <=> abs($a['percent_diff']);
+            // Then, sort by the absolute magnitude of the trade value
+            return abs($b['trade_value']) <=> abs($a['trade_value']);
         });
 
         if (empty($column_diff)) {
@@ -768,6 +772,9 @@ EOF
                 $has_traded           = ( $quantity_diff != 0 );
                 $display_percent_diff = $has_traded ? $percent_diff : 0;
 
+                $price_for_trade = $new_price > 0 ? $new_price : $old_price;
+                $trade_value     = $price_for_trade * $quantity_diff;
+
                 if (abs($percent_diff) > 0.00001) { // Only include significant changes
                     $sectionDiffs[ $company ] = [
                         'has_traded'           => $has_traded,
@@ -778,6 +785,7 @@ EOF
                         'quantity_diff'        => $quantity_diff,
                         'old_price'            => $old_price,
                         'new_price'            => $new_price,
+                        'trade_value'          => $trade_value,
                     ];
                 }
             }
@@ -794,8 +802,8 @@ EOF
                     return $a['has_traded'] ? - 1 : 1;
                 }
 
-                // Then, sort by the absolute magnitude of the real percentage change
-                return abs($b['percent_diff']) <=> abs($a['percent_diff']);
+                // Then, sort by the absolute magnitude of the trade value
+                return abs($b['trade_value']) <=> abs($a['trade_value']);
             });
             // Display section header with readable name
             $sectionDisplayName = $this->getSectionDisplayName($sectionKey);
