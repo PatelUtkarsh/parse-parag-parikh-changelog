@@ -1,6 +1,7 @@
 <?php
 
 declare(strict_types=1);
+
 namespace Spock\PhpParseMutualFund;
 
 use GuzzleHttp\Exception\GuzzleException;
@@ -90,11 +91,23 @@ class ParseCommand extends Command
                  InputOption::VALUE_OPTIONAL,
                  'For comparing new sheet as Y, As if Y - X.',
                  1
+             )
+             ->addOption(
+                 'open',
+                 'o',
+                 InputOption::VALUE_NONE,
+                 'Open the latest month\'s Excel file directly (macOS only).'
              );
     }
 
     public function execute(InputInterface $input, OutputInterface $output): int
     {
+        $this->output = $output;
+
+        if ($input->getOption('open')) {
+            return $this->openLatestFile($output);
+        }
+
         $fundNameOption = $input->getOption('fund-name');
         $option         = is_scalar($fundNameOption) ? (string) $fundNameOption : 'tax'; // Default
 
@@ -226,7 +239,9 @@ class ParseCommand extends Command
 
     /**
      * Temporary helper to flatten sectioned data for backward compatibility
+     * // phpcs:disable Generic.Files.LineLength.TooLong
      * @param array<string, array<int, array{name: string, percent: float, quantity: int, market_value: float}>> $sectionData
+     * // phpcs:enable
      * @return array<string, array{percent: float, quantity: int, market_value: float}>
      */
     private function flattenSectionData(array $sectionData): array
@@ -680,8 +695,10 @@ EOF
 
     /**
      * Display section-wise comparison between old and new data
+     * // phpcs:disable Generic.Files.LineLength.TooLong
      * @param array<string, array<int, array{name: string, percent: float, quantity: int, market_value: float}>> $oldSections
      * @param array<string, array<int, array{name: string, percent: float, quantity: int, market_value: float}>> $newSections
+     * // phpcs:enable
      */
     private function displaySectionWiseComparison(array $oldSections, array $newSections, OutputInterface $output): void
     {
@@ -842,5 +859,29 @@ EOF
         ];
 
         return $displayNames[ $sectionKey ] ?? ucwords(str_replace('_', ' ', $sectionKey));
+    }
+
+    private function openLatestFile(OutputInterface $output): int
+    {
+        $output->writeln('<info>Attempting to open the latest portfolio file...</info>');
+
+        // We use month 1, as that corresponds to the last completed month's report.
+        $latest_path = $this->downloadHandler(1);
+
+        if (!$latest_path) {
+            $output->writeln('<error>Could not download the latest portfolio file.</error>');
+            return Command::FAILURE;
+        }
+
+        if (strtoupper(substr(PHP_OS, 0, 3)) !== 'DAR') {
+            $output->writeln('<error>The --open flag is only supported on macOS.</error>');
+            $output->writeln("File downloaded to: {$latest_path}");
+            return Command::FAILURE;
+        }
+
+        $output->writeln("Opening: {$latest_path}");
+        shell_exec('open ' . escapeshellarg($latest_path));
+
+        return Command::SUCCESS;
     }
 }

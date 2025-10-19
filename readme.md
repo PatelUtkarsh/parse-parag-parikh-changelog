@@ -32,6 +32,7 @@ php index.php parse [options] [--] [<month-diff-x>]
 
 - `-f, --fund-name`: The name of the fund to analyze. Supported values are `flexi`, `liquid`, `hybrid`, `tax`. Defaults to `tax`.
 - `-y, --month-diff-y`: Specifies the newer month for comparison, as a difference from the current month. For example, `1` means last month. Defaults to `1`.
+- `-o, --open`: **(macOS only)** Downloads and opens the latest month's Excel file directly.
 - `--help`: Display help for the command.
 
 **Example:**
@@ -62,6 +63,20 @@ The tool outputs one or more tables directly to the console.
 ### Sorting
 
 The table is sorted to show actively traded stocks first, ordered by the magnitude of their percentage change. Stocks with only price-driven changes are listed below them.
+
+## For Developers
+
+This project uses `php_codesniffer` for linting (PSR-12) and `phpstan` for static analysis (Level 9).
+
+- **Run Linter:**
+  ```bash
+  composer lint
+  ```
+
+- **Run Static Analysis:**
+  ```bash
+  composer stan
+  ```
 
 ## Screenshot
 
