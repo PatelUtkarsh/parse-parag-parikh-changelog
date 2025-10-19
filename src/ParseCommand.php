@@ -101,51 +101,189 @@ class ParseCommand extends Command {
 		$old_flat = $this->flattenSectionData($old_sheet);
 		$new_flat = $this->flattenSectionData($new_sheet);
 
-		// Compare key and value = find diff of % and list.
-		$column_diff = [];
-		$all_companies = array_unique(array_merge(array_keys($old_flat), array_keys($new_flat)));
-
-		foreach ( $all_companies as $name ) {
-			$old_percentage = $old_flat[$name] ?? 0;
-			$new_percentage = $new_flat[$name] ?? 0;
-			$diff = $new_percentage - $old_percentage;
-
-			// Only include if there's a significant change (more than 0.001%)
-			if (abs($diff) > 0.00001) {
-				$column_diff[$name] = [
-					'diff' => $diff,
-					'old' => $old_percentage,
-					'new' => $new_percentage
-				];
-			}
-		}
-
-		// Sort by absolute difference (biggest changes first)
-		uasort($column_diff, function($a, $b) {
-			return abs($b['diff']) <=> abs($a['diff']);
-		});
-
-		if (empty($column_diff)) {
-			$output->writeln( '<comment>No significant changes found between the two periods.</comment>' );
-			return Command::SUCCESS;
-		}
-
-		$table = new Table( $output );
-		$table->setHeaders( [ 'Company Name', 'Change (%)', 'Previous (%)', 'Current (%)' ] );
-
-		foreach ( $column_diff as $name => $data ) {
-			$changeColor = $data['diff'] > 0 ? 'green' : 'red';
-			$changeSymbol = $data['diff'] > 0 ? '+' : '';
-
-			$table->addRow( [
-				$name,
-				"<fg={$changeColor}>{$changeSymbol}" . round( $data['diff'] * 100, 4 ) . '%',
-				round( $data['old'] * 100, 4 ) . '%',
-				round( $data['new'] * 100, 4 ) . '%'
-			] );
-		}
-		$table->render();
-
+				// Compare key and value = find diff of % and list.
+				$column_diff = [];
+				$all_companies = array_unique(array_merge(array_keys($old_flat), array_keys($new_flat)));
+		
+												foreach ( $all_companies as $name ) {
+		
+													$old_quantity = $old_flat[$name]['quantity'] ?? 0;
+		
+													$new_quantity = $new_flat[$name]['quantity'] ?? 0;
+		
+													$quantity_diff = $new_quantity - $old_quantity;
+		
+										
+		
+													$old_market_value = $old_flat[$name]['market_value'] ?? 0;
+		
+													$new_market_value = $new_flat[$name]['market_value'] ?? 0;
+		
+										
+		
+													$old_percent = $old_flat[$name]['percent'] ?? 0;
+		
+													$new_percent = $new_flat[$name]['percent'] ?? 0;
+		
+													$percent_diff = $new_percent - $old_percent;
+		
+										
+		
+													$old_price = ($old_quantity > 0) ? ($old_market_value * 100000) / $old_quantity : 0;
+		
+													$new_price = ($new_quantity > 0) ? ($new_market_value * 100000) / $new_quantity : 0;
+		
+										
+		
+													$has_traded = ($quantity_diff != 0);
+		
+													$display_percent_diff = $has_traded ? $percent_diff : 0;
+		
+										
+		
+													if (abs($percent_diff) > 0.00001) { // Include if there's any real percentage change
+		
+														$column_diff[$name] = [
+		
+															'has_traded' => $has_traded,
+		
+															'percent_diff' => $percent_diff, // Real diff for sorting
+		
+															'display_percent_diff' => $display_percent_diff, // Diff for display
+		
+															'old_percent' => $old_percent,
+		
+															'new_percent' => $new_percent,
+		
+															'quantity_diff' => $quantity_diff,
+		
+															'old_price' => $old_price,
+		
+															'new_price' => $new_price,
+		
+														];
+		
+													}
+		
+												}
+		
+										
+		
+												// Multi-level sort
+		
+												uasort($column_diff, function($a, $b) {
+		
+													// Stocks with trades should come first
+		
+													if ($a['has_traded'] !== $b['has_traded']) {
+		
+														return $a['has_traded'] ? -1 : 1;
+		
+													}
+		
+													// Then, sort by the absolute magnitude of the real percentage change
+		
+													return abs($b['percent_diff']) <=> abs($a['percent_diff']);
+		
+												});
+		
+						
+		
+								if (empty($column_diff)) {
+		
+									$output->writeln( '<comment>No significant changes found between the two periods.</comment>' );
+		
+									return Command::SUCCESS;
+		
+								}
+		
+						
+		
+								$table = new Table( $output );
+		
+								$table->setHeaders( [ 'Company Name', 'Change (%)', 'Old %', 'New %', 'Change (Shares)', 'Old Price', 'New Price' ] );
+		
+						
+		
+										foreach ( $column_diff as $name => $data ) {
+		
+						
+		
+											$percentChangeColor = $data['display_percent_diff'] == 0 ? 'default' : ($data['display_percent_diff'] > 0 ? 'green' : 'red');
+		
+						
+		
+											$percentChangeSymbol = $data['display_percent_diff'] > 0 ? '+' : '';
+		
+						
+		
+											$qtyChangeColor = $data['quantity_diff'] > 0 ? 'green' : 'red';
+		
+						
+		
+											$qtyChangeSymbol = $data['quantity_diff'] > 0 ? '+' : '';
+		
+						
+		
+								
+		
+						
+		
+											$old_price_display = $data['old_price'] > 0 ? number_format($data['old_price'], 2) : 'N/A';
+		
+						
+		
+											$new_price_display = $data['new_price'] > 0 ? number_format($data['new_price'], 2) : 'N/A';
+		
+						
+		
+								
+		
+						
+		
+											$wrapped_name = wordwrap($name, 50, "\n", true);
+		
+						
+		
+											$table->addRow( [
+		
+						
+		
+												$wrapped_name,
+		
+						
+		
+												"<fg={$percentChangeColor}>{$percentChangeSymbol}" . number_format($data['display_percent_diff'] * 100, 2) . '%</>',
+		
+						
+		
+												number_format($data['old_percent'] * 100, 2) . '%',
+		
+						
+		
+												number_format($data['new_percent'] * 100, 2) . '%',
+		
+						
+		
+												"<fg={$qtyChangeColor}>{$qtyChangeSymbol}" . number_format($data['quantity_diff']) . '</>',
+		
+						
+		
+												$old_price_display,
+		
+						
+		
+												$new_price_display
+		
+						
+		
+											] );
+		
+						
+		
+										}
+		
+								$table->render();
 		// Also display section-wise breakdown
 		$this->displaySectionWiseComparison($old_sheet, $new_sheet, $output);
 
@@ -163,9 +301,15 @@ class ParseCommand extends Command {
 
 				// If this normalized name already exists, combine the percentages
 				if (isset($flattened[$normalizedName])) {
-					$flattened[$normalizedName] += $item['percent'];
+					$flattened[$normalizedName]['percent'] += $item['percent'];
+					$flattened[$normalizedName]['quantity'] += $item['quantity'];
+					$flattened[$normalizedName]['market_value'] += $item['market_value'];
 				} else {
-					$flattened[$normalizedName] = $item['percent'];
+					$flattened[$normalizedName] = [
+						'percent' => $item['percent'],
+						'quantity' => $item['quantity'],
+						'market_value' => $item['market_value']
+					];
 				}
 			}
 		}
@@ -250,6 +394,8 @@ class ParseCommand extends Command {
 			// Detect columns by looking at headers and data patterns
 			$nameColumn = null;
 			$percentColumn = null;
+			$quantityColumn = null;
+			$marketValueColumn = null;
 
 			// Check first 20 rows to find column headers (increased from 10)
 			for ($row = 1; $row <= 20; $row++) {
@@ -269,6 +415,14 @@ class ParseCommand extends Command {
 							strpos($lowerValue, 'security') !== false ||
 							strpos($lowerValue, 'instrument') !== false) {
 							$nameColumn = $col;
+						}
+						if (strpos($lowerValue, 'quantity') !== false) {
+							$quantityColumn = $col;
+						}
+						if (strpos($lowerValue, 'market') !== false || strpos($lowerValue, 'value') !== false) {
+							if (strpos($lowerValue, 'rs.') !== false || strpos($lowerValue, 'lakhs') !== false) {
+								$marketValueColumn = $col;
+							}
 						}
 						if (strpos($lowerValue, '%') !== false ||
 							strpos($lowerValue, 'percent') !== false ||
@@ -294,20 +448,22 @@ class ParseCommand extends Command {
 					}
 				}
 
-				if ($nameColumn && $percentColumn) {
+				if ($nameColumn && $percentColumn && $quantityColumn && $marketValueColumn) {
 					break;
 				}
 			}
 
 			// Fallback to default columns if detection failed
 			if (!$nameColumn) $nameColumn = 'B';
+			if (!$quantityColumn) $quantityColumn = 'E';
+			if (!$marketValueColumn) $marketValueColumn = 'F';
 			if (!$percentColumn) $percentColumn = 'G';
 
-			$this->output->isVerbose() && $this->output->writeln("Detected columns: Name={$nameColumn}, Percent={$percentColumn}");
+			$this->output->isVerbose() && $this->output->writeln("Detected columns: Name={$nameColumn}, Percent={$percentColumn}, Quantity={$quantityColumn}, MarketValue={$marketValueColumn}");
 
 			// Second pass: read only the detected columns with improved filter
 			$filterSubset = new ImprovedFilterRowColumns();
-			$filterSubset->setTargetColumns([$nameColumn, $percentColumn]);
+			$filterSubset->setTargetColumns([$nameColumn, $percentColumn, $quantityColumn, $marketValueColumn]);
 
 			$reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReader( $inputFileType );
 			$reader->setReadDataOnly( true );
@@ -363,6 +519,8 @@ class ParseCommand extends Command {
 					// Get potential name and percent values
 					$name_value = trim((string)$worksheet->getCell($nameColumn . $row_number)->getValue());
 					$percent_value_raw = $worksheet->getCell($percentColumn . $row_number)->getValue();
+					$quantity_value_raw = $worksheet->getCell($quantityColumn . $row_number)->getValue();
+					$market_value_raw = $worksheet->getCell($marketValueColumn . $row_number)->getValue();
 
 					// Validate name_value as a data item
 					if (empty($name_value) || strlen($name_value) <= 2) {
@@ -408,8 +566,29 @@ class ParseCommand extends Command {
 						continue; // Skip invalid or zero percentages
 					}
 
+					// Validate and Convert quantity_value_raw
+					$quantity_numeric = 0;
+					if (is_string($quantity_value_raw)) {
+						$quantity_numeric = (int)str_replace(',', '', $quantity_value_raw);
+					} elseif (is_numeric($quantity_value_raw)) {
+						$quantity_numeric = (int)$quantity_value_raw;
+					}
+
+					// Validate and Convert market_value_raw
+					$market_value_numeric = 0.0;
+					if (is_string($market_value_raw)) {
+						$market_value_numeric = (float)str_replace(',', '', $market_value_raw);
+					} elseif (is_numeric($market_value_raw)) {
+						$market_value_numeric = (float)$market_value_raw;
+					}
+
 					// Add valid data item to current section
-					$current_section_items[] = ['name' => $name_value, 'percent' => $percent_numeric];
+					$current_section_items[] = [
+						'name' => $name_value,
+						'percent' => $percent_numeric,
+						'quantity' => $quantity_numeric,
+						'market_value' => $market_value_numeric
+					];
 					$this->output->isVerbose() && $this->output->writeln("Added to {$current_section_normalized_key}: {$name_value} ({$percent_numeric})");
 				}
 			}
@@ -506,90 +685,132 @@ class ParseCommand extends Command {
 	/**
 	 * Display section-wise comparison between old and new data
 	 */
-	private function displaySectionWiseComparison(array $oldSections, array $newSections, OutputInterface $output): void {
-		$output->writeln("\n<info>Section-wise Breakdown:</info>");
-
-		// Get all sections from both datasets
-		$allSections = array_unique(array_merge(array_keys($oldSections), array_keys($newSections)));
-		sort($allSections);
-
-		foreach ($allSections as $sectionKey) {
-			$oldItems = $oldSections[$sectionKey] ?? [];
-			$newItems = $newSections[$sectionKey] ?? [];
-
-			// Create lookup arrays for easier comparison with normalization
-			$oldLookup = [];
-			foreach ($oldItems as $item) {
-				$normalizedName = $this->normalizeCompanyName($item['name']);
-				if (isset($oldLookup[$normalizedName])) {
-					$oldLookup[$normalizedName] += $item['percent'];
-				} else {
-					$oldLookup[$normalizedName] = $item['percent'];
+		private function displaySectionWiseComparison(array $oldSections, array $newSections, OutputInterface $output): void {
+			$output->writeln("\n<info>Section-wise Breakdown:</info>");
+	
+			// Get all sections from both datasets
+			$allSections = array_unique(array_merge(array_keys($oldSections), array_keys($newSections)));
+			sort($allSections);
+	
+			foreach ($allSections as $sectionKey) {
+				$oldItems = $oldSections[$sectionKey] ?? [];
+				$newItems = $newSections[$sectionKey] ?? [];
+	
+				// Create lookup arrays for easier comparison with normalization
+				$oldLookup = [];
+				foreach ($oldItems as $item) {
+					$normalizedName = $this->normalizeCompanyName($item['name']);
+					if (isset($oldLookup[$normalizedName])) {
+						$oldLookup[$normalizedName]['percent'] += $item['percent'];
+						$oldLookup[$normalizedName]['quantity'] += $item['quantity'];
+						$oldLookup[$normalizedName]['market_value'] += $item['market_value'];
+					} else {
+						$oldLookup[$normalizedName] = [
+							'percent' => $item['percent'],
+							'quantity' => $item['quantity'],
+							'market_value' => $item['market_value']
+						];
+					}
 				}
-			}
-
-			$newLookup = [];
-			foreach ($newItems as $item) {
-				$normalizedName = $this->normalizeCompanyName($item['name']);
-				if (isset($newLookup[$normalizedName])) {
-					$newLookup[$normalizedName] += $item['percent'];
-				} else {
-					$newLookup[$normalizedName] = $item['percent'];
+	
+				$newLookup = [];
+				foreach ($newItems as $item) {
+					$normalizedName = $this->normalizeCompanyName($item['name']);
+					if (isset($newLookup[$normalizedName])) {
+						$newLookup[$normalizedName]['percent'] += $item['percent'];
+						$newLookup[$normalizedName]['quantity'] += $item['quantity'];
+						$newLookup[$normalizedName]['market_value'] += $item['market_value'];
+					} else {
+						$newLookup[$normalizedName] = [
+							'percent' => $item['percent'],
+							'quantity' => $item['quantity'],
+							'market_value' => $item['market_value']
+						];
+					}
 				}
+	
+				// Get all companies in this section
+				$allCompanies = array_unique(array_merge(array_keys($oldLookup), array_keys($newLookup)));
+	
+							// Calculate differences for this section
+							$sectionDiffs = [];
+							foreach ($allCompanies as $company) {
+								$old_quantity = $oldLookup[$company]['quantity'] ?? 0;
+								$new_quantity = $newLookup[$company]['quantity'] ?? 0;
+								$quantity_diff = $new_quantity - $old_quantity;
+				
+								$old_market_value = $oldLookup[$company]['market_value'] ?? 0;
+								$new_market_value = $newLookup[$company]['market_value'] ?? 0;
+				
+								$old_percent = $oldLookup[$company]['percent'] ?? 0;
+								$new_percent = $newLookup[$company]['percent'] ?? 0;
+								$percent_diff = $new_percent - $old_percent;
+				
+								$old_price = ($old_quantity > 0) ? ($old_market_value * 100000) / $old_quantity : 0;
+								$new_price = ($new_quantity > 0) ? ($new_market_value * 100000) / $new_quantity : 0;
+				
+								$has_traded = ($quantity_diff != 0);
+								$display_percent_diff = $has_traded ? $percent_diff : 0;
+				
+								if (abs($percent_diff) > 0.00001) { // Only include significant changes
+									$sectionDiffs[$company] = [
+										'has_traded' => $has_traded,
+										'percent_diff' => $percent_diff,
+										'display_percent_diff' => $display_percent_diff,
+										'old_percent' => $old_percent,
+										'new_percent' => $new_percent,
+										'quantity_diff' => $quantity_diff,
+										'old_price' => $old_price,
+										'new_price' => $new_price,
+									];
+								}
+							}
+				
+							// Skip section if no changes
+							if (empty($sectionDiffs)) {
+								continue;
+							}
+				
+							// Sort by absolute difference
+							uasort($sectionDiffs, function($a, $b) {
+								// Stocks with trades should come first
+								if ($a['has_traded'] !== $b['has_traded']) {
+									return $a['has_traded'] ? -1 : 1;
+								}
+								// Then, sort by the absolute magnitude of the real percentage change
+								return abs($b['percent_diff']) <=> abs($a['percent_diff']);
+							});	
+				// Display section header with readable name
+				$sectionDisplayName = $this->getSectionDisplayName($sectionKey);
+	
+				// Create table for this section with section name in the header
+				$sectionTable = new Table($output);
+				$sectionTable->setHeaders([$sectionDisplayName, 'Change (%)', 'Old %', 'New %', 'Change (Shares)', 'Old Price', 'New Price']);
+	
+							foreach ($sectionDiffs as $company => $data) {
+								$percentChangeColor = $data['display_percent_diff'] == 0 ? 'default' : ($data['display_percent_diff'] > 0 ? 'green' : 'red');
+								$percentChangeSymbol = $data['display_percent_diff'] > 0 ? '+' : '';
+								$qtyChangeColor = $data['quantity_diff'] > 0 ? 'green' : 'red';
+								$qtyChangeSymbol = $data['quantity_diff'] > 0 ? '+' : '';
+				
+								$old_price_display = $data['old_price'] > 0 ? number_format($data['old_price'], 2) : 'N/A';
+								$new_price_display = $data['new_price'] > 0 ? number_format($data['new_price'], 2) : 'N/A';
+				
+								$wrapped_company = wordwrap($company, 50, "\n", true);
+								$sectionTable->addRow([
+									$wrapped_company,
+									"<fg={$percentChangeColor}>{$percentChangeSymbol}" . number_format($data['display_percent_diff'] * 100, 2) . '%</>',
+									number_format($data['old_percent'] * 100, 2) . '%',
+									number_format($data['new_percent'] * 100, 2) . '%',
+									"<fg={$qtyChangeColor}>{$qtyChangeSymbol}" . number_format($data['quantity_diff']) . '</>',
+									$old_price_display,
+									$new_price_display
+								]);
+							}	
+				$sectionTable->render();
+				$output->writeln(''); // Add spacing between sections
 			}
-
-			// Get all companies in this section
-			$allCompanies = array_unique(array_merge(array_keys($oldLookup), array_keys($newLookup)));
-
-			// Calculate differences for this section
-			$sectionDiffs = [];
-			foreach ($allCompanies as $company) {
-				$oldPercent = $oldLookup[$company] ?? 0;
-				$newPercent = $newLookup[$company] ?? 0;
-				$diff = $newPercent - $oldPercent;
-
-				if (abs($diff) > 0.00001) { // Only include significant changes
-					$sectionDiffs[$company] = [
-						'diff' => $diff,
-						'old' => $oldPercent,
-						'new' => $newPercent
-					];
-				}
-			}
-
-			// Skip section if no changes
-			if (empty($sectionDiffs)) {
-				continue;
-			}
-
-			// Sort by absolute difference
-			uasort($sectionDiffs, function($a, $b) {
-				return abs($b['diff']) <=> abs($a['diff']);
-			});
-
-			// Display section header with readable name
-			$sectionDisplayName = $this->getSectionDisplayName($sectionKey);
-
-			// Create table for this section with section name in the header
-			$sectionTable = new Table($output);
-			$sectionTable->setHeaders([$sectionDisplayName, 'Change (%)', 'Previous (%)', 'Current (%)']);
-
-			foreach ($sectionDiffs as $company => $data) {
-				$changeColor = $data['diff'] > 0 ? 'green' : 'red';
-				$changeSymbol = $data['diff'] > 0 ? '+' : '';
-
-				$sectionTable->addRow([
-					$company,
-					"<fg={$changeColor}>{$changeSymbol}" . round($data['diff'] * 100, 4) . '%',
-					round($data['old'] * 100, 4) . '%',
-					round($data['new'] * 100, 4) . '%'
-				]);
-			}
-
-			$sectionTable->render();
-			$output->writeln(''); // Add spacing between sections
 		}
-	}
 
 	/**
 	 * Convert section key to readable display name
