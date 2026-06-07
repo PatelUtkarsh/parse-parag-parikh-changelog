@@ -143,19 +143,21 @@ class ParseCommand extends Command
         $new_flat = $this->flattenSectionData($new_sheet);
 
         // Compare key and value = find diff of % and list.
-        $column_diff   = [];
-        $all_companies = array_unique(array_merge(array_keys($old_flat), array_keys($new_flat)));
+        $column_diff = [];
+        $all_keys    = array_unique(array_merge(array_keys($old_flat), array_keys($new_flat)));
 
-        foreach ($all_companies as $name) {
-            $old_quantity  = $old_flat[ $name ]['quantity'] ?? 0;
-            $new_quantity  = $new_flat[ $name ]['quantity'] ?? 0;
+        foreach ($all_keys as $key) {
+            $name = $new_flat[ $key ]['name'] ?? $old_flat[ $key ]['name'] ?? $key;
+
+            $old_quantity  = $old_flat[ $key ]['quantity'] ?? 0;
+            $new_quantity  = $new_flat[ $key ]['quantity'] ?? 0;
             $quantity_diff = $new_quantity - $old_quantity;
 
-            $old_market_value = $old_flat[ $name ]['market_value'] ?? 0;
-            $new_market_value = $new_flat[ $name ]['market_value'] ?? 0;
+            $old_market_value = $old_flat[ $key ]['market_value'] ?? 0;
+            $new_market_value = $new_flat[ $key ]['market_value'] ?? 0;
 
-            $old_percent  = $old_flat[ $name ]['percent'] ?? 0;
-            $new_percent  = $new_flat[ $name ]['percent'] ?? 0;
+            $old_percent  = $old_flat[ $key ]['percent'] ?? 0;
+            $new_percent  = $new_flat[ $key ]['percent'] ?? 0;
             $percent_diff = $new_percent - $old_percent;
 
             $old_price = ( $old_quantity > 0 ) ? ( $old_market_value * 100000 ) / $old_quantity : 0;
@@ -168,7 +170,8 @@ class ParseCommand extends Command
             $trade_value     = $price_for_trade * $quantity_diff;
 
             if (abs($percent_diff) > 0.00001) { // Include if there's any real percentage change
-                $column_diff[ $name ] = [
+                $column_diff[ $key ] = [
+                    'name'                 => $name,
                     'has_traded'           => $has_traded,
                     'percent_diff'         => $percent_diff, // Real diff for sorting
                     'display_percent_diff' => $display_percent_diff, // Diff for display
@@ -210,7 +213,7 @@ class ParseCommand extends Command
             'New Price'
         ]);
 
-        foreach ($column_diff as $name => $data) {
+        foreach ($column_diff as $data) {
             $percentChangeColor  = $data['display_percent_diff'] == 0 ? 'default'
                 : ( $data['display_percent_diff'] > 0 ? 'green' : 'red' );
             $percentChangeSymbol = $data['display_percent_diff'] > 0 ? '+' : '';
@@ -220,7 +223,7 @@ class ParseCommand extends Command
             $old_price_display = $data['old_price'] > 0 ? number_format($data['old_price'], 2) : 'N/A';
             $new_price_display = $data['new_price'] > 0 ? number_format($data['new_price'], 2) : 'N/A';
 
-            $wrapped_name = wordwrap($name, 50, "\n", true);
+            $wrapped_name = wordwrap($data['name'], 50, "\n", true);
             $table->addRow([
                 $wrapped_name,
                 "<fg={$percentChangeColor}>{$percentChangeSymbol}" . number_format(
@@ -242,35 +245,67 @@ class ParseCommand extends Command
     }
 
     /**
-     * Temporary helper to flatten sectioned data for backward compatibility
+     * Flatten all sections into a single holding map keyed by ISIN (name fallback).
      * // phpcs:disable Generic.Files.LineLength.TooLong
-     * @param array<string, array<int, array{name: string, percent: float, quantity: int, market_value: float}>> $sectionData
+     * @param array<string, array<int, array{name: string, isin: string, percent: float, quantity: int, market_value: float}>> $sectionData
+     * @return array<string, array{name: string, percent: float, quantity: int, market_value: float}>
      * // phpcs:enable
-     * @return array<string, array{percent: float, quantity: int, market_value: float}>
      */
     private function flattenSectionData(array $sectionData): array
     {
-        $flattened = [];
-        foreach ($sectionData as $items) {
-            foreach ($items as $item) {
-                $normalizedName = $this->normalizeCompanyName($item['name']);
-
-                // If this normalized name already exists, combine the percentages
-                if (isset($flattened[ $normalizedName ])) {
-                    $flattened[ $normalizedName ]['percent']      += $item['percent'];
-                    $flattened[ $normalizedName ]['quantity']     += $item['quantity'];
-                    $flattened[ $normalizedName ]['market_value'] += $item['market_value'];
-                } else {
-                    $flattened[ $normalizedName ] = [
-                        'percent'      => $item['percent'],
-                        'quantity'     => $item['quantity'],
-                        'market_value' => $item['market_value']
-                    ];
-                }
+        $items = [];
+        foreach ($sectionData as $sectionItems) {
+            foreach ($sectionItems as $item) {
+                $items[] = $item;
             }
         }
 
-        return $flattened;
+        return $this->aggregateByKey($items);
+    }
+
+    /**
+     * Aggregate holdings by a stable key, summing percent, quantity and market value.
+     * Holdings sharing an ISIN (or a normalized name when ISIN is absent) are merged.
+     * // phpcs:disable Generic.Files.LineLength.TooLong
+     * @param array<int, array{name: string, isin: string, percent: float, quantity: int, market_value: float}> $items
+     * @return array<string, array{name: string, percent: float, quantity: int, market_value: float}>
+     * // phpcs:enable
+     */
+    private function aggregateByKey(array $items): array
+    {
+        $aggregated = [];
+        foreach ($items as $item) {
+            $key = $this->buildHoldingKey($item['isin'], $item['name']);
+
+            if (isset($aggregated[ $key ])) {
+                $aggregated[ $key ]['percent']      += $item['percent'];
+                $aggregated[ $key ]['quantity']     += $item['quantity'];
+                $aggregated[ $key ]['market_value'] += $item['market_value'];
+            } else {
+                $aggregated[ $key ] = [
+                    'name'         => $item['name'],
+                    'percent'      => $item['percent'],
+                    'quantity'     => $item['quantity'],
+                    'market_value' => $item['market_value']
+                ];
+            }
+        }
+
+        return $aggregated;
+    }
+
+    /**
+     * Build a stable match key for a holding. A valid 12-character ISIN is preferred;
+     * otherwise the normalized company name is used (e.g. TREPS, Net Receivables).
+     */
+    private function buildHoldingKey(string $isin, string $name): string
+    {
+        $isin = strtoupper(trim($isin));
+        if (preg_match('/^[A-Z]{2}[A-Z0-9]{9}[0-9]$/', $isin) === 1) {
+            return 'ISIN:' . $isin;
+        }
+
+        return 'NAME:' . $this->normalizeCompanyName($name);
     }
 
     /**
@@ -335,7 +370,9 @@ class ParseCommand extends Command
     }
 
     /**
-     * @return array<string, array<int, array{name: string, percent: float, quantity: int, market_value: float}>>
+     * // phpcs:disable Generic.Files.LineLength.TooLong
+     * @return array<string, array<int, array{name: string, isin: string, percent: float, quantity: int, market_value: float}>>
+     * // phpcs:enable
      */
     public function getExcelColumnMap(string $filename, string $sheetCode, int $try = 0): array
     {
@@ -358,6 +395,7 @@ class ParseCommand extends Command
 
             // Detect columns by looking at headers and data patterns
             $nameColumn        = null;
+            $isinColumn        = null;
             $percentColumn     = null;
             $quantityColumn    = null;
             $marketValueColumn = null;
@@ -382,6 +420,9 @@ class ParseCommand extends Command
                             strpos($lowerValue, 'instrument') !== false
                         ) {
                             $nameColumn = $col;
+                        }
+                        if (strpos($lowerValue, 'isin') !== false) {
+                            $isinColumn = $col;
                         }
                         if (strpos($lowerValue, 'quantity') !== false) {
                             $quantityColumn = $col;
@@ -426,6 +467,9 @@ class ParseCommand extends Command
             if (! $nameColumn) {
                 $nameColumn = 'B';
             }
+            if (! $isinColumn) {
+                $isinColumn = 'C';
+            }
             if (! $quantityColumn) {
                 $quantityColumn = 'E';
             }
@@ -437,14 +481,16 @@ class ParseCommand extends Command
             }
 
             $this->output->isVerbose() && $this->output->writeln(
-                "Detected columns: Name={$nameColumn}, Percent={$percentColumn}, " .
+                "Detected columns: Name={$nameColumn}, ISIN={$isinColumn}, Percent={$percentColumn}, " .
 
                 "Quantity={$quantityColumn}, MarketValue={$marketValueColumn}"
             );
 
             // Second pass: read only the detected columns with improved filter
             $filterSubset = new ImprovedFilterRowColumns();
-            $filterSubset->setTargetColumns([ $nameColumn, $percentColumn, $quantityColumn, $marketValueColumn ]);
+            $filterSubset->setTargetColumns(
+                [ $nameColumn, $isinColumn, $percentColumn, $quantityColumn, $marketValueColumn ]
+            );
 
             $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReader($inputFileType);
             $reader->setReadDataOnly(true);
@@ -501,6 +547,7 @@ class ParseCommand extends Command
                 if ($current_section_normalized_key !== null) {
                     // Get potential name and percent values
                     $name_value         = trim($worksheet->getCell($nameColumn . $row_number)->getFormattedValue());
+                    $isin_value         = trim($worksheet->getCell($isinColumn . $row_number)->getFormattedValue());
                     $percent_value_raw  = $worksheet->getCell($percentColumn . $row_number)->getFormattedValue();
                     $quantity_value_raw = $worksheet->getCell($quantityColumn . $row_number)->getValue();
                     $market_value_raw   = $worksheet->getCell($marketValueColumn . $row_number)->getValue();
@@ -568,6 +615,7 @@ class ParseCommand extends Command
                     // Add valid data item to current section
                     $current_section_items[] = [
                         'name'         => $name_value,
+                        'isin'         => $isin_value,
                         'percent'      => $percent_numeric,
                         'quantity'     => $quantity_numeric,
                         'market_value' => $market_value_numeric
@@ -700,8 +748,8 @@ EOF
     /**
      * Display section-wise comparison between old and new data
      * // phpcs:disable Generic.Files.LineLength.TooLong
-     * @param array<string, array<int, array{name: string, percent: float, quantity: int, market_value: float}>> $oldSections
-     * @param array<string, array<int, array{name: string, percent: float, quantity: int, market_value: float}>> $newSections
+     * @param array<string, array<int, array{name: string, isin: string, percent: float, quantity: int, market_value: float}>> $oldSections
+     * @param array<string, array<int, array{name: string, isin: string, percent: float, quantity: int, market_value: float}>> $newSections
      * // phpcs:enable
      */
     private function displaySectionWiseComparison(array $oldSections, array $newSections, OutputInterface $output): void
@@ -716,54 +764,27 @@ EOF
             $oldItems = $oldSections[ $sectionKey ] ?? [];
             $newItems = $newSections[ $sectionKey ] ?? [];
 
-            // Create lookup arrays for easier comparison with normalization
-            $oldLookup = [];
-            foreach ($oldItems as $item) {
-                $normalizedName = $this->normalizeCompanyName($item['name']);
-                if (isset($oldLookup[ $normalizedName ])) {
-                    $oldLookup[ $normalizedName ]['percent']      += $item['percent'];
-                    $oldLookup[ $normalizedName ]['quantity']     += $item['quantity'];
-                    $oldLookup[ $normalizedName ]['market_value'] += $item['market_value'];
-                } else {
-                    $oldLookup[ $normalizedName ] = [
-                        'percent'      => $item['percent'],
-                        'quantity'     => $item['quantity'],
-                        'market_value' => $item['market_value']
-                    ];
-                }
-            }
+            // Aggregate each side by ISIN (name fallback) for reliable matching
+            $oldLookup = $this->aggregateByKey($oldItems);
+            $newLookup = $this->aggregateByKey($newItems);
 
-            $newLookup = [];
-            foreach ($newItems as $item) {
-                $normalizedName = $this->normalizeCompanyName($item['name']);
-                if (isset($newLookup[ $normalizedName ])) {
-                    $newLookup[ $normalizedName ]['percent']      += $item['percent'];
-                    $newLookup[ $normalizedName ]['quantity']     += $item['quantity'];
-                    $newLookup[ $normalizedName ]['market_value'] += $item['market_value'];
-                } else {
-                    $newLookup[ $normalizedName ] = [
-                        'percent'      => $item['percent'],
-                        'quantity'     => $item['quantity'],
-                        'market_value' => $item['market_value']
-                    ];
-                }
-            }
-
-            // Get all companies in this section
-            $allCompanies = array_unique(array_merge(array_keys($oldLookup), array_keys($newLookup)));
+            // Get all holdings in this section
+            $allKeys = array_unique(array_merge(array_keys($oldLookup), array_keys($newLookup)));
 
             // Calculate differences for this section
             $sectionDiffs = [];
-            foreach ($allCompanies as $company) {
-                $old_quantity  = $oldLookup[ $company ]['quantity'] ?? 0;
-                $new_quantity  = $newLookup[ $company ]['quantity'] ?? 0;
+            foreach ($allKeys as $key) {
+                $company = $newLookup[ $key ]['name'] ?? $oldLookup[ $key ]['name'] ?? $key;
+
+                $old_quantity  = $oldLookup[ $key ]['quantity'] ?? 0;
+                $new_quantity  = $newLookup[ $key ]['quantity'] ?? 0;
                 $quantity_diff = $new_quantity - $old_quantity;
 
-                $old_market_value = $oldLookup[ $company ]['market_value'] ?? 0;
-                $new_market_value = $newLookup[ $company ]['market_value'] ?? 0;
+                $old_market_value = $oldLookup[ $key ]['market_value'] ?? 0;
+                $new_market_value = $newLookup[ $key ]['market_value'] ?? 0;
 
-                $old_percent  = $oldLookup[ $company ]['percent'] ?? 0;
-                $new_percent  = $newLookup[ $company ]['percent'] ?? 0;
+                $old_percent  = $oldLookup[ $key ]['percent'] ?? 0;
+                $new_percent  = $newLookup[ $key ]['percent'] ?? 0;
                 $percent_diff = $new_percent - $old_percent;
 
                 $old_price = ( $old_quantity > 0 ) ? ( $old_market_value * 100000 ) / $old_quantity : 0;
@@ -776,7 +797,8 @@ EOF
                 $trade_value     = $price_for_trade * $quantity_diff;
 
                 if (abs($percent_diff) > 0.00001) { // Only include significant changes
-                    $sectionDiffs[ $company ] = [
+                    $sectionDiffs[ $key ] = [
+                        'name'                 => $company,
                         'has_traded'           => $has_traded,
                         'percent_diff'         => $percent_diff,
                         'display_percent_diff' => $display_percent_diff,
@@ -820,7 +842,7 @@ EOF
                 'New Price'
             ]);
 
-            foreach ($sectionDiffs as $company => $data) {
+            foreach ($sectionDiffs as $data) {
                 $percentChangeColor  = $data['display_percent_diff'] == 0 ? 'default'
                     : ( $data['display_percent_diff'] > 0 ? 'green' : 'red' );
                 $percentChangeSymbol = $data['display_percent_diff'] > 0 ? '+' : '';
@@ -830,7 +852,7 @@ EOF
                 $old_price_display = $data['old_price'] > 0 ? number_format($data['old_price'], 2) : 'N/A';
                 $new_price_display = $data['new_price'] > 0 ? number_format($data['new_price'], 2) : 'N/A';
 
-                $wrapped_company = wordwrap($company, 50, "\n", true);
+                $wrapped_company = wordwrap($data['name'], 50, "\n", true);
                 $sectionTable->addRow([
                     $wrapped_company,
                     "<fg={$percentChangeColor}>{$percentChangeSymbol}" . number_format(
