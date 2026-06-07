@@ -17,10 +17,13 @@ class ParseCommand extends Command
     private OutputInterface $output;
 
     private const SHEET_MAP = [
-        'flexi'  => 'PPFCF',
-        'liquid' => 'PPFLP',
-        'hybrid' => 'PPCHF',
-        'tax'    => [ 'PPTSF', 'PPETSF' ],
+        'flexi'     => 'PPFCF',
+        'liquid'    => 'PPLF',
+        'hybrid'    => 'PPCHF',
+        'tax'       => [ 'PPTSF', 'PPETSF' ],
+        'arbitrage' => 'PPAF',
+        'dynamic'   => 'PPDAAF',
+        'largecap'  => 'PPLCF',
     ];
 
     private const TARGET_SECTION_HEADERS = [
@@ -694,7 +697,9 @@ EOF
             $response  = $client->get($url, [ 'sink' => $fp ]);
             $http_code = $response->getStatusCode();
         } catch (GuzzleException $e) {
-            $this->output->writeln('<error>HTTP request failed: ' . $e->getMessage() . '</error>');
+            // Not fatal on its own: downloadHandler falls back from .xlsx to .xls.
+            $this->output->isVerbose() &&
+            $this->output->writeln('<comment>HTTP request failed: ' . $e->getMessage() . '</comment>');
             fclose($fp);
             unlink($temp_file);
 
@@ -704,7 +709,8 @@ EOF
         fclose($fp);
 
         if ($http_code !== 200) {
-            $this->output->writeln('<error>HTTP error code: ' . $http_code . '</error>');
+            $this->output->isVerbose() &&
+            $this->output->writeln('<comment>HTTP error code: ' . $http_code . '</comment>');
             unlink($temp_file);
 
             return false;

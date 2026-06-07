@@ -30,7 +30,7 @@ php index.php parse [options] [--] [<month-diff-x>]
 
 **Options:**
 
-- `-f, --fund-name`: The name of the fund to analyze. Supported values are `flexi`, `liquid`, `hybrid`, `tax`. Defaults to `tax`.
+- `-f, --fund-name`: The name of the fund to analyze. Supported values are `flexi`, `liquid`, `hybrid`, `tax`, `arbitrage`, `dynamic`, `largecap`. Defaults to `tax`.
 - `-y, --month-diff-y`: Specifies the newer month for comparison, as a difference from the current month. For example, `1` means last month. Defaults to `1`.
 - `-o, --open`: **(macOS only)** Downloads and opens the latest month's Excel file directly.
 - `--help`: Display help for the command.
