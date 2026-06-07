@@ -401,9 +401,10 @@ class ParseCommand extends Command
             $marketValueColumn = null;
 
             // Check first 20 rows to find column headers (increased from 10)
+            $scanColumns = [ 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L' ];
             for ($row = 1; $row <= 20; $row++) {
                 $rowData = [];
-                for ($col = 'B'; $col <= 'L'; $col++) {
+                foreach ($scanColumns as $col) {
                     $cell            = $worksheet->getCell($col . $row);
                     $value           = $cell->getValue();
                     $rowData[ $col ] = $value;
